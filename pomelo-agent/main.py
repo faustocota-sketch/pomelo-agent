@@ -43,13 +43,13 @@ def odoo_call(s, model, method, args=[], kwargs={}):
 def ejecutar_accion_odoo(accion):
     s, uid = odoo_session()
     if not s:
-        return "ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ No se pudo conectar a Odoo"
+        return "ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ No se pudo conectar a Odoo"
     model  = accion.get("model")
     method = accion.get("method")
     args   = accion.get("args", [])
     kwargs = accion.get("kwargs", {})
     if not model or not method:
-        return "ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ Falta model o method"
+        return "ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ Falta model o method"
     try:
         if method == "write" and args and args[0] == []:
             ids = odoo_call(s, model, "search", [[]], {"limit": 5000})
@@ -70,25 +70,25 @@ def ejecutar_accion_odoo(accion):
                                 extras.append(f"{k}: {v}")
                             elif isinstance(v, list) and len(v) == 2:
                                 extras.append(f"{k}: {v[1]}")
-                    line = f"ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ {name}"
+                    line = f"ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ {name}"
                     if extras:
                         line += f" ({', '.join(extras[:4])})"
                     lines.append(line)
                 total = len(resultado)
                 resp = "\n".join(lines)
                 if total > 25:
-                    resp += f"\n... y {total-25} mÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¡s"
-                return f"ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ {total} registros:\n{resp}"
+                    resp += f"\n... y {total-25} mÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¡s"
+                return f"ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ {total} registros:\n{resp}"
             else:
-                return f"ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ Completado: {resultado[:10]}"
+                return f"ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ Completado: {resultado[:10]}"
         elif isinstance(resultado, bool):
-            return "ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ OperaciÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ³n completada"
+            return "ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ OperaciÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ³n completada"
         elif isinstance(resultado, int):
-            return f"ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ Creado con ID: {resultado}"
+            return f"ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ Creado con ID: {resultado}"
         else:
-            return f"ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ {resultado}"
+            return f"ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ {resultado}"
     except Exception as e:
-        return f"ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ Error: {str(e)}"
+        return f"ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ Error: {str(e)}"
 
 def get_odoo_summary():
     try:
@@ -108,7 +108,7 @@ def get_odoo_summary():
         return {"status": "error"}
 
 # ============================================================
-# WEBHOOK MERCADO PAGO ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ ODOO
+# WEBHOOK MERCADO PAGO ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ ODOO
 # ============================================================
 def get_or_create_mp_journal(s):
     """Obtiene o crea el diario bancario de Mercado Pago en Odoo"""
@@ -126,7 +126,7 @@ def registrar_pago_odoo(pago_mp):
     """Registra un pago de MP como movimiento bancario en Odoo"""
     s, uid = odoo_session()
     if not s:
-        return False, "Sin conexiÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ³n a Odoo"
+        return False, "Sin conexiÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ³n a Odoo"
     try:
         monto       = float(pago_mp.get("transaction_amount", 0))
         mp_id       = str(pago_mp.get("id", ""))
@@ -143,7 +143,7 @@ def registrar_pago_odoo(pago_mp):
         existentes = odoo_call(s, "account.bank.statement.line", "search_read",
             [[["payment_ref", "ilike", f"MP-{mp_id}"]]], {"fields": ["id"], "limit": 1})
         if existentes:
-            return True, f"Pago MP #{mp_id} ya registrado ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ ignorado"
+            return True, f"Pago MP #{mp_id} ya registrado ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ ignorado"
 
         journal_id = get_or_create_mp_journal(s)
 
@@ -165,7 +165,7 @@ def registrar_pago_odoo(pago_mp):
             vals["partner_id"] = partner_id
 
         odoo_call(s, "account.bank.statement.line", "create", [vals])
-        return True, f"ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ Pago MP #{mp_id} registrado: ${monto:,.2f} MXN"
+        return True, f"ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ Pago MP #{mp_id} registrado: ${monto:,.2f} MXN"
 
     except Exception as e:
         return False, str(e)
@@ -209,7 +209,7 @@ Fechas en formato YYYY-MM-DD. Solo el JSON, sin texto adicional."""
 def crear_oc_en_odoo(datos_oc):
     s, uid = odoo_session()
     if not s:
-        return {"success": False, "error": "Sin conexiÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ³n a Odoo"}
+        return {"success": False, "error": "Sin conexiÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ³n a Odoo"}
     try:
         nombre_prov = datos_oc.get("proveedor", {}).get("nombre", "Proveedor Desconocido")
         proveedores = odoo_call(s, "res.partner", "search_read",
@@ -261,7 +261,7 @@ def crear_oc_en_odoo(datos_oc):
         return {
             "success": True, "oc_id": oc_id, "proveedor": msg_prov,
             "productos": len(lineas), "total": datos_oc.get("total", 0),
-            "mensaje": f"ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ OC #{oc_id} creada\n{msg_prov}\n{len(lineas)} productos\nTotal: ${datos_oc.get('total',0):,.2f} {datos_oc.get('moneda','MXN')}"
+            "mensaje": f"ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ OC #{oc_id} creada\n{msg_prov}\n{len(lineas)} productos\nTotal: ${datos_oc.get('total',0):,.2f} {datos_oc.get('moneda','MXN')}"
         }
     except Exception as e:
         return {"success": False, "error": str(e)}
@@ -269,17 +269,17 @@ def crear_oc_en_odoo(datos_oc):
 # ============================================================
 # SYSTEM PROMPT
 # ============================================================
-SYSTEM_PROMPT = """Eres Claudio, agente IA de Pomelo Derma ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ farmacia dermatologica premium en Mexico.
+SYSTEM_PROMPT = """Eres Claudio, agente IA de Pomelo Derma ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ farmacia dermatologica premium en Mexico.
 Tienes acceso COMPLETO a Odoo. Estado actual: {contexto}
 
 MODELOS ODOO:
-- pos.order ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ ventas POS (fields: name, amount_total, date_order, state, partner_id)
-- purchase.order ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ OC (fields: name, partner_id, amount_total, state, date_order)
-- res.partner ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ clientes/proveedores (customer_rank>0 = cliente, supplier_rank>0 = proveedor)
-- account.move ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ facturas (move_type: out_invoice=venta, in_invoice=compra proveedor)
-- account.bank.statement.line ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ movimientos bancarios MP (fields: payment_ref, amount, date, journal_id)
-- product.template ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ productos
-- stock.quant ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ inventario (fields: product_id, quantity, location_id)
+- pos.order ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ ventas POS (fields: name, amount_total, date_order, state, partner_id)
+- purchase.order ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ OC (fields: name, partner_id, amount_total, state, date_order)
+- res.partner ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ clientes/proveedores (customer_rank>0 = cliente, supplier_rank>0 = proveedor)
+- account.move ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ facturas (move_type: out_invoice=venta, in_invoice=compra proveedor)
+- account.bank.statement.line ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ movimientos bancarios MP (fields: payment_ref, amount, date, journal_id)
+- product.template ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ productos
+- stock.quant ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ inventario (fields: product_id, quantity, location_id)
 
 EJEMPLOS:
 Ventas POS: ODOO_ACTION:{{"model":"pos.order","method":"search_read","args":[[["state","in",["done","paid","invoiced"]]]],"kwargs":{{"fields":["name","amount_total","date_order","partner_id"],"limit":10,"order":"date_order desc"}}}}
@@ -345,7 +345,7 @@ def ocr_oc():
         image_base64 = data.get("image")
         media_type   = data.get("media_type", "image/jpeg")
         if not image_base64:
-            return jsonify({"error": "No se recibiÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ³ imagen"}), 400
+            return jsonify({"error": "No se recibiÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ³ imagen"}), 400
         datos_oc  = procesar_oc_imagen(image_base64, media_type)
         if "error" in datos_oc:
             return jsonify({"error": datos_oc["error"]}), 500
@@ -360,7 +360,7 @@ def chat():
     mensaje   = data.get("mensaje", "")
     historial = data.get("historial", [])
     if not ANTHROPIC_KEY:
-        return jsonify({"respuesta": "ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ API Key no configurada", "accion": None})
+        return jsonify({"respuesta": "ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ API Key no configurada", "accion": None})
     contexto = get_odoo_summary()
     system   = SYSTEM_PROMPT.replace("{contexto}", json.dumps(contexto, ensure_ascii=False))
     try:
@@ -371,7 +371,7 @@ def chat():
             timeout=30)
         response_data = r.json()
         if "content" not in response_data:
-            return jsonify({"respuesta": f"ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ Error: {response_data.get('error',{}).get('message','')}", "accion": None})
+            return jsonify({"respuesta": f"ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ Error: {response_data.get('error',{}).get('message','')}", "accion": None})
         texto = response_data["content"][0]["text"]
         accion_resultado = None
         if "ODOO_ACTION:" in texto:
@@ -384,14 +384,14 @@ def chat():
                 accion = json.loads(accion_str)
                 accion_resultado = ejecutar_accion_odoo(accion)
             except Exception as e:
-                accion_resultado = f"ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ Error: {str(e)}"
+                accion_resultado = f"ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ Error: {str(e)}"
         else:
             texto_limpio = texto
         return jsonify({"respuesta": texto_limpio, "accion": accion_resultado})
     except requests.Timeout:
-        return jsonify({"respuesta": "ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ Timeout ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ intenta de nuevo.", "accion": None})
+        return jsonify({"respuesta": "ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ Timeout ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ intenta de nuevo.", "accion": None})
     except Exception as e:
-        return jsonify({"respuesta": f"ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ Error: {str(e)}", "accion": None})
+        return jsonify({"respuesta": f"ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ Error: {str(e)}", "accion": None})
 
 
 # ============================================================
@@ -509,8 +509,14 @@ def mp_reporte_webhook():
             if "csv" in str(f.get("type", "")):
                 file_url = f.get("url")
                 break
+        # Asegurar https://
+        if file_url and not file_url.startswith("http"):
+            file_url = "https://" + file_url
         if not file_url and files:
             file_url = files[0].get("url")
+        # Asegurar que la URL tenga https://
+        if file_url and not file_url.startswith("http"):
+            file_url = "https://" + file_url
         if not file_url:
             print(f"[MP REPORTE WEBHOOK] Sin URL: {data}")
             return jsonify({"status": "ok", "mensaje": "sin archivo aun"}), 200
@@ -571,7 +577,7 @@ if __name__ == "__main__":
     app.run(host="0.0.0.0", port=port, debug=False)
 
 # ============================================================
-# SINCRONIZACION DIARIA MP ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ ODOO CONTABILIDAD
+# SINCRONIZACION DIARIA MP ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ ODOO CONTABILIDAD
 # ============================================================
 
 def sincronizar_movimientos_mp(dias=1):
