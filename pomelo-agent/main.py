@@ -743,7 +743,7 @@ FACTURA_HTML = """<!DOCTYPE html><html lang='es'><head><meta charset='UTF-8'><me
 
 @app.route('/facturas', methods=['GET'])
 def facturas_home():
-    return FACTURA_HTML, 200, {'Content-Type': 'text/html; charset=utf-8'}
+    return send_from_directory('static', 'facturas.html')
 
 @app.route('/facturas/analizar', methods=['POST'])
 def facturas_analizar():
