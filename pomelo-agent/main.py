@@ -415,7 +415,12 @@ def facturas_confirmar():
         lineas = []
         for p in productos:
             if not p.get('producto_id'):
-                continue
+                # Si hay candidatos, usar el primero automaticamente
+                cands = p.get('candidatos', [])
+                if cands:
+                    p['producto_id'] = cands[0]['id']
+                else:
+                    continue
             line = {
                 'product_id': p['producto_id'],
                 'name': p.get('descripcion', ''),
