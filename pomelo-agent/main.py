@@ -357,5 +357,44 @@ def facturas_confirmar():
             resultados.append({"producto": nombre, "ok": False, "error": "no encontrado"})
     return jsonify({"ok": True, "resultados": resultados, "fecha": fecha})
 
+@app.route("/facturas/analizar-xml", methods=["POST"])
+def facturas_analizar_xml():
+    import xml.etree.ElementTree as ET
+    xml_file = request.files.get("xml")
+    if not xml_file:
+        return jsonify({"error": "No se recibio XML"}), 400
+    try:
+        content = xml_file.read().decode("utf-8",errors="replace")
+        root = ET.fromstring(content)
+        tag = root.tag
+        if "{http://www.sat.gob.mx/cfd/4}" in tag: ns="http://www.sat.gob.mx/cfd/4"
+        else: ns="http://www.sat.gob.mx/cfd/3"
+        def g(el,attr): return el.get(attr,"") if el is not None else ""
+        emisor=root.find(f"{{{ns}}}Emisor")
+        rfc_emisor=g(emisor,"Rfc"); nombre_emisor=g(emisor,"Nombre")
+        fecha=root.get("Fecha","")[:10]; folio=root.get("Serie","")+root.get("Folio","")
+        subtotal=float(root.get("SubTotal",0)); total=float(root.get("Total",0)); moneda=root.get("Moneda","MXN")
+        s,uid=odoo_session()
+        proveedor_id=None; proveedor_nombre=nombre_emisor
+        if s and uid and rfc_emisor:
+            provs=odoo_call(s,"res.partner","search_read",[[[("vat","=",rfc_emisor)]]],{"fields":["id","name"],"limit":1})
+            if provs: proveedor_id=provs[0]["id"]; proveedor_nombre=provs[0]["name"]
+        productos=[]; total_iva=0.0
+        for c in root.findall(f".//{{{ns}}}Concepto"):
+            barcode=c.get("NoIdentificacion",""); desc=c.get("Descripcion","")
+            qty=float(c.get("Cantidad",1)); unit_price=float(c.get("ValorUnitario",0)); importe=float(c.get("Importe",0))
+            iva_pct=0.0
+            imp=c.find(f"{{{ns}}}Impuestos")
+            if imp is not None:
+                for t in imp.findall(f".//{{{ns}}}Traslado"):
+                    if t.get("Impuesto")=="002": iva_pct=float(t.get("TasaOCuota",0))*100; total_iva+=float(t.get("Importe",0))
+            prod_id=None; prod_nom=desc
+            if s and uid and barcode:
+                prods=odoo_call(s,"product.product","search_read",[[[("barcode","=",barcode)]]],{"fields":["id","name"],"limit":1})
+                if prods: prod_id=prods[0]["id"]; prod_nom=prods[0]["name"]
+            productos.append({"barcode":barcode,"descripcion":desc,"cantidad":qty,"precio_unitario":unit_price,"subtotal":importe,"iva_pct":iva_pct,"producto_id":prod_id,"producto_nombre":prod_nom,"encontrado":prod_id is not None})
+        return jsonify({"ok":True,"fuente":"xml_cfdi","proveedor":proveedor_nombre,"proveedor_id":proveedor_id,"rfc_emisor":rfc_emisor,"fecha":fecha,"folio":folio.strip(),"moneda":moneda,"subtotal":subtotal,"iva":round(total_iva,2),"total":total,"productos":productos})
+    except Exception as e: return jsonify({"error":str(e)}), 500
+
 if __name__ == "__main__":
     app.run(debug=False, host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
