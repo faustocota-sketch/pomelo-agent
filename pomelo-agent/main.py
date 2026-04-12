@@ -388,11 +388,18 @@ def facturas_analizar_xml():
             if imp is not None:
                 for t in imp.findall(f".//{{{ns}}}Traslado"):
                     if t.get("Impuesto")=="002": iva_pct=float(t.get("TasaOCuota",0))*100; total_iva+=float(t.get("Importe",0))
-            prod_id=None; prod_nom=desc
-            if s and uid and barcode:
-                prods=odoo_call(s,"product.product","search_read",[[["barcode","=",barcode]]],{"fields":["id","name"],"limit":1})
-                if prods: prod_id=prods[0]["id"]; prod_nom=prods[0]["name"]
-            productos.append({"barcode":barcode,"descripcion":desc,"cantidad":qty,"precio_unitario":unit_price,"subtotal":importe,"iva_pct":iva_pct,"producto_id":prod_id,"producto_nombre":prod_nom,"encontrado":prod_id is not None})
+            prod_id=None; prod_nom=desc; candidatos=[]
+            if s and uid:
+                if barcode:
+                    prods=odoo_call(s,"product.product","search_read",[[["barcode","=",barcode]]],{"fields":["id","name","barcode"],"limit":1})
+                    if prods: prod_id=prods[0]["id"]; prod_nom=prods[0]["name"]
+                if not prod_id and desc:
+                    termino=desc[:40].strip()
+                    cands=odoo_call(s,"product.product","search_read",[[["name","ilike",termino]]],{"fields":["id","name","barcode"],"limit":3})
+                    if cands:
+                        candidatos=[{"id":c["id"],"nombre":c["name"],"barcode":c.get("barcode","")} for c in cands]
+                        prod_id=cands[0]["id"]; prod_nom=cands[0]["name"]
+            productos.append({"barcode":barcode,"descripcion":desc,"cantidad":qty,"precio_unitario":unit_price,"subtotal":importe,"iva_pct":iva_pct,"producto_id":prod_id,"producto_nombre":prod_nom,"encontrado":prod_id is not None,"candidatos":candidatos})
         return jsonify({"ok":True,"fuente":"xml_cfdi","proveedor":proveedor_nombre,"proveedor_id":proveedor_id,"rfc_emisor":rfc_emisor,"fecha":fecha,"folio":folio.strip(),"moneda":moneda,"subtotal":subtotal,"iva":round(total_iva,2),"total":total,"productos":productos})
     except Exception as e: return jsonify({"error":str(e)}), 500
 
