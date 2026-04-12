@@ -403,5 +403,87 @@ def facturas_analizar_xml():
         return jsonify({"ok":True,"fuente":"xml_cfdi","proveedor":proveedor_nombre,"proveedor_id":proveedor_id,"rfc_emisor":rfc_emisor,"fecha":fecha,"folio":folio.strip(),"moneda":moneda,"subtotal":subtotal,"iva":round(total_iva,2),"total":total,"productos":productos})
     except Exception as e: return jsonify({"error":str(e)}), 500
 
+@app.route('/facturas/confirmar', methods=['POST'])
+def facturas_confirmar():
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'No se recibieron datos'}), 400
+        s, uid = odoo_session()
+        if not s or not uid:
+            return jsonify({'error': 'No se pudo conectar a Odoo'}), 500
+        proveedor_id = data.get('proveedor_id')
+        if not proveedor_id:
+            return jsonify({'error': 'Proveedor no identificado'}), 400
+        fecha = data.get('fecha') or str(__import__('datetime').date.today())
+        folio = data.get('folio', '')
+        subtotal = float(data.get('subtotal', 0))
+        iva = float(data.get('iva', 0))
+        total = float(data.get('total', 0))
+        productos = data.get('productos', [])
+        # Cuenta 505.01.01 Purchases of Raw Materials
+        cuentas_compra = odoo_call(s, 'account.account', 'search_read',
+            [[['code', '=', '505.01.01']]],
+            {'fields': ['id', 'name'], 'limit': 1})
+        cuenta_compra_id = cuentas_compra[0]['id'] if cuentas_compra else None
+        # Cuenta IVA acreditable 118.01
+        cuentas_iva = odoo_call(s, 'account.account', 'search_read',
+            [[['code', 'like', '118']]],
+            {'fields': ['id', 'name'], 'limit': 1})
+        cuenta_iva_id = cuentas_iva[0]['id'] if cuentas_iva else None
+        # Impuesto IVA 16%
+        impuestos = odoo_call(s, 'account.tax', 'search_read',
+            [[['type_tax_use', '=', 'purchase'], ['amount', '=', 16]]],
+            {'fields': ['id', 'name'], 'limit': 1})
+        impuesto_iva_id = impuestos[0]['id'] if impuestos else None
+        # Construir lineas de factura
+        lineas = []
+        for p in productos:
+            if not p.get('producto_id'):
+                continue
+            line = {
+                'product_id': p['producto_id'],
+                'name': p.get('descripcion', ''),
+                'quantity': float(p.get('cantidad', 1)),
+                'price_unit': float(p.get('precio_unitario', 0)),
+                'account_id': cuenta_compra_id,
+            }
+            iva_pct = float(p.get('iva_pct', 0))
+            if iva_pct > 0 and impuesto_iva_id:
+                line['tax_ids'] = [[6, 0, [impuesto_iva_id]]]
+            else:
+                line['tax_ids'] = [[6, 0, []]]
+            lineas.append([0, 0, line])
+        if not lineas:
+            return jsonify({'error': 'No hay productos vinculados a Odoo. Verifica los candidatos.'}), 400
+        # Crear factura de proveedor en borrador
+        move_vals = {
+            'move_type': 'in_invoice',
+            'partner_id': proveedor_id,
+            'invoice_date': fecha,
+            'ref': folio,
+            'invoice_line_ids': lineas,
+        }
+        move_id = odoo_call(s, 'account.move', 'create', [move_vals])
+        # Actualizar standard_price de cada producto
+        actualizados = []
+        for p in productos:
+            if p.get('producto_id') and p.get('precio_unitario'):
+                try:
+                    odoo_call(s, 'product.product', 'write',
+                        [[p['producto_id']], {'standard_price': float(p['precio_unitario'])}])
+                    actualizados.append(p['producto_id'])
+                except:
+                    pass
+        return jsonify({
+            'ok': True,
+            'move_id': move_id,
+            'mensaje': f'Factura creada en borrador (ID {move_id}). {len(actualizados)} costos actualizados.',
+            'url_odoo': f'https://pomelo-derma.odoo.com/odoo/accounting/vendor-bills/{move_id}',
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 if __name__ == "__main__":
     app.run(debug=False, host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
