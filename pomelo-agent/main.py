@@ -387,6 +387,7 @@ def facturas_confirmar():
         if not s or not uid:
             return jsonify({'error': 'No se pudo conectar a Odoo'}), 500
         proveedor_id = data.get('proveedor_id')
+        print(f'DEBUG confirmar - proveedor_id={proveedor_id} keys={list(data.keys())}')
         if not proveedor_id:
             return jsonify({'error': 'Proveedor no identificado'}), 400
         fecha = data.get('fecha') or str(__import__('datetime').date.today())
