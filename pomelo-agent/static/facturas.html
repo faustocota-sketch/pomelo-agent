@@ -160,6 +160,11 @@ async function confirmar() {
             body: JSON.stringify(dat)
         });
         var d = await r.json();
+        if (!r.ok || d.error) {
+            e.className = 'st se';
+            e.textContent = 'Error: ' + (d.error || 'Error desconocido');
+            return;
+        }
         e.className = 'st so';
         e.textContent = d.mensaje || 'Guardado en Odoo';
         document.querySelector('.ac').style.display = 'none';
