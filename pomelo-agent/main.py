@@ -14,14 +14,14 @@ ODOO_URL      = "https://pomelo-derma.odoo.com"
 ODOO_DB       = "pomelo-derma"
 ODOO_USER     = os.environ.get("ODOO_USER", "carolmartinezderma@gmail.com")
 ODOO_PASSWORD = os.environ.get("ODOO_PASSWORD", "")
-ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY", "")h
 MP_ACCESS_TOKEN   = os.environ.get("MP_ACCESS_TOKEN", "")
 MP_WEBHOOK_SECRET = os.environ.get("MP_WEBHOOK_SECRET", "")
 
 # SFTP sftpcloud
 SFTP_HOST = os.environ.get("SFTP_HOST", "us-east-1.sftpcloud.io")
 SFTP_PORT = int(os.environ.get("SFTP_PORT", "22"))
-SFTP_USER = os.environ.get("SFTP_USER", "851d07d6229e48178ec899317dc87bee")
+SFTP_USER = os.environ.get("SFTP_USER") or "851d07d6229e48178ec899317dc87bee"
 SFTP_PASS = os.environ.get("SFTP_PASS", "")
 
 MP_JOURNAL_NAME = os.environ.get("MP_JOURNAL_NAME", "Mercado Pago")
