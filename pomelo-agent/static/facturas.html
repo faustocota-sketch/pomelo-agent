@@ -181,6 +181,34 @@ function reiniciar() {
     document.getElementById('zc').style.display = 'block';
     document.getElementById('fi').value = '';
 }
+
+function esXML(f){return f.name.toLowerCase().endsWith('.xml');}
+function cargarXML(file){
+  var sa=document.getElementById('sa');
+  sa.style.display='block';sa.className='st so';sa.textContent='Leyendo XML: '+file.name+'...';
+  var reader=new FileReader();
+  reader.onload=function(e){
+    sa.textContent='Enviando a Claudio...';
+    var fd=new FormData();
+    fd.append('xml',new Blob([e.target.result],{type:'text/xml'}),file.name);
+    fetch('/facturas/analizar-xml',{method:'POST',body:fd})
+    .then(function(res){return res.json();})
+    .then(function(data){
+      if(data.error){sa.className='st se';sa.textContent='Error: '+data.error;return;}
+      mostrarResultado(data);
+    })
+    .catch(function(err){sa.className='st se';sa.textContent='Error: '+String(err);});
+  };
+  reader.readAsText(file,'utf-8');
+}
+var _cargarOrig=cargar;
+function cargar(input){
+  var files=Array.from(input.files);
+  var xmlF=files.find(function(f){return esXML(f);});
+  if(xmlF){cargarXML(xmlF);return;}
+  _cargarOrig.call(this,input);
+}
+
 </script>
 </body>
 </html>
