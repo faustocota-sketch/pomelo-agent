@@ -367,7 +367,7 @@ def facturas_analizar_xml():
                     prods=odoo_call(s,'product.product','search_read',[[['barcode','=',barcode]]],{'fields':['id','name','barcode'],'limit':1})
                     if prods: prod_id=prods[0]['id']; prod_nom=prods[0]['name']
                 if not prod_id and desc:
-                    termino=re.sub(r'^\[.*?\]\s*', '', desc)[:40].strip()
+                    termino=(desc.split(']',1)[1].strip() if desc.startswith('[') and ']' in desc else desc)[:40].strip()
                     cands=odoo_call(s,'product.product','search_read',[[['name','ilike',termino]]],{'fields':['id','name','barcode'],'limit':3})
                     if cands:
                         candidatos=[{'id':c['id'],'nombre':c['name'],'barcode':c.get('barcode','')} for c in cands]
