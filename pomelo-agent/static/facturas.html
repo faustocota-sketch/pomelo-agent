@@ -40,7 +40,7 @@ tr:nth-child(even){background:#f9fafb}
   <p style="color:#6b7280;margin-bottom:12px;text-align:center">Toma foto de la factura del proveedor</p>
   <button class="btn bg" onclick="abrirCamara()">Tomar Foto</button>
   <button class="btn bc" onclick="document.getElementById('fi').click()">Elegir Imagen</button>
-  <input type="file" id="fi" accept="image/*" onchange="cargar(this)">
+  <input type="file" id="fi" accept="image/*,.xml,.pdf" onchange="cargar(this)" multiple>
   <img id="pv" alt="preview">
   <button class="btn bb" id="ba" onclick="analizar()">Analizar con IA</button>
   <div id="sa" class="st"></div>
