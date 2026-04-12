@@ -140,9 +140,7 @@ function mostrar(d) {
         return '<div class="ii"><div class="il">' + x[0] + '</div><div class="iv">' + x[1] + '</div></div>';
     }).join('');
     document.getElementById('tb').innerHTML = (d.productos || []).map(function(p) {
-        return '<tr><td>' + p.nombre + (p.lote ? '<br><small>L:' + p.lote + '</small>' : '') +
-               (p.caducidad ? '<br><small>Cad:' + p.caducidad + '</small>' : '') +
-               '</td><td>' + p.cantidad + '</td><td>' + fmt(p.precio_unitario) + '</td><td>' + fmt(p.subtotal) + '</td></tr>';
+        var nomProd=p.producto_nombre||p.nombre||p.descripcion||'-';var selOpts='';if(p.candidatos&&p.candidatos.length>0){selOpts='<br><select style="font-size:.75rem;width:100%;margin-top:3px" onchange="window._cands=window._cands||{};window._cands[p.barcode||p.descripcion]=parseInt(this.value)">'+p.candidatos.map(function(c){return '<option value="'+c.id+'"'+(c.id==p.producto_id?' selected':'')+'>'+c.nombre+'</option>';}).join('')+'</select>';}var badge=p.encontrado?'<small style="color:#1a7a4a"> en Odoo</small>':'<small style="color:#e67e22"> '+p.descripcion.substring(0,30)+'</small>';return '<tr><td>'+nomProd+selOpts+'<br>'+badge+'</td><td>'+p.cantidad+'</td><td>'+fmt(p.precio_unitario)+'</td><td>'+fmt(p.subtotal)+'</td></tr>';
     }).join('');
     document.getElementById('ts').textContent = fmt(d.subtotal);
     document.getElementById('ti').textContent = fmt(d.iva);
