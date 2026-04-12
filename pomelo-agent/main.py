@@ -377,7 +377,7 @@ def facturas_analizar_xml():
         s,uid=odoo_session()
         proveedor_id=None; proveedor_nombre=nombre_emisor
         if s and uid and rfc_emisor:
-            provs=odoo_call(s,"res.partner","search_read",[[[("vat","=",rfc_emisor)]]],{"fields":["id","name"],"limit":1})
+            provs=odoo_call(s,"res.partner","search_read",[["vat","=",rfc_emisor]],{"fields":["id","name"],"limit":1})
             if provs: proveedor_id=provs[0]["id"]; proveedor_nombre=provs[0]["name"]
         productos=[]; total_iva=0.0
         for c in root.findall(f".//{{{ns}}}Concepto"):
@@ -390,7 +390,7 @@ def facturas_analizar_xml():
                     if t.get("Impuesto")=="002": iva_pct=float(t.get("TasaOCuota",0))*100; total_iva+=float(t.get("Importe",0))
             prod_id=None; prod_nom=desc
             if s and uid and barcode:
-                prods=odoo_call(s,"product.product","search_read",[[[("barcode","=",barcode)]]],{"fields":["id","name"],"limit":1})
+                prods=odoo_call(s,"product.product","search_read",[["barcode","=",barcode]],{"fields":["id","name"],"limit":1})
                 if prods: prod_id=prods[0]["id"]; prod_nom=prods[0]["name"]
             productos.append({"barcode":barcode,"descripcion":desc,"cantidad":qty,"precio_unitario":unit_price,"subtotal":importe,"iva_pct":iva_pct,"producto_id":prod_id,"producto_nombre":prod_nom,"encontrado":prod_id is not None})
         return jsonify({"ok":True,"fuente":"xml_cfdi","proveedor":proveedor_nombre,"proveedor_id":proveedor_id,"rfc_emisor":rfc_emisor,"fecha":fecha,"folio":folio.strip(),"moneda":moneda,"subtotal":subtotal,"iva":round(total_iva,2),"total":total,"productos":productos})
