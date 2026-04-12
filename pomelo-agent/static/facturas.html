@@ -154,6 +154,16 @@ async function confirmar() {
     e.style.display = 'block';
     e.textContent = 'Registrando en Odoo...';
     try {
+        // Actualizar producto_id desde los dropdowns antes de enviar
+        if (window._cands) {
+            dat.productos = dat.productos.map(function(p) {
+                var key = p.barcode || p.descripcion;
+                if (window._cands[key] !== undefined) {
+                    p.producto_id = window._cands[key];
+                }
+                return p;
+            });
+        }
         var r = await fetch('/facturas/confirmar', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
