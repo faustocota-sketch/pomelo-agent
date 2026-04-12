@@ -14,7 +14,7 @@ ODOO_URL      = "https://pomelo-derma.odoo.com"
 ODOO_DB       = "pomelo-derma"
 ODOO_USER     = os.environ.get("ODOO_USER", "carolmartinezderma@gmail.com")
 ODOO_PASSWORD = os.environ.get("ODOO_PASSWORD", "")
-ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY", "")h
+ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 MP_ACCESS_TOKEN   = os.environ.get("MP_ACCESS_TOKEN", "")
 MP_WEBHOOK_SECRET = os.environ.get("MP_WEBHOOK_SECRET", "")
 
