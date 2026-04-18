@@ -1,5 +1,5 @@
 from flask import Flask, request, jsonify, send_from_directory
-import requests, os, json, base64, hmac, hashlib, logging
+import requests, os, json, base64, csv, io, logging
 from datetime import date, datetime, timedelta
 import xml.etree.ElementTree as ET
 
@@ -32,17 +32,14 @@ def odoo_session():
         return (None, None)
 
 def odoo_call(s, model, method, args=[], kwargs={}):
-    try:
-        r = s.post(f"{ODOO_URL}/web/dataset/call_kw", json={
-            "jsonrpc": "2.0", "method": "call",
-            "params": {"model": model, "method": method, "args": args, "kwargs": kwargs}
-        }, timeout=20)
-        result = r.json()
-        if "error" in result:
-            raise Exception(result["error"]["data"].get("message", "Error Odoo"))
-        return result.get("result")
-    except Exception as e:
-        raise Exception(str(e))
+    r = s.post(f"{ODOO_URL}/web/dataset/call_kw", json={
+        "jsonrpc": "2.0", "method": "call",
+        "params": {"model": model, "method": method, "args": args, "kwargs": kwargs}
+    }, timeout=30)
+    result = r.json()
+    if "error" in result:
+        raise Exception(result["error"]["data"].get("message", "Error Odoo"))
+    return result.get("result")
 
 def ejecutar_accion_odoo(accion):
     s, uid = odoo_session()
@@ -66,7 +63,7 @@ def ejecutar_accion_odoo(accion):
             if isinstance(resultado[0], dict):
                 lines = []
                 for r in resultado[:25]:
-                    name = r.get("name") or r.get("display_name") or r.get("pos_reference") or str(r.get("id",""))
+                    name = r.get("name") or r.get("display_name") or str(r.get("id",""))
                     extras = []
                     for k, v in r.items():
                         if k not in ["id","name","display_name"] and v and v is not False:
@@ -94,21 +91,184 @@ def ejecutar_accion_odoo(accion):
     except Exception as e:
         return f"Error: {str(e)}"
 
-# ============================================================
-# WEBHOOK MERCADO PAGO -> ODOO
-# ============================================================
 def get_or_create_mp_journal(s):
     diarios = odoo_call(s, "account.journal", "search_read",
                        [[["code", "=", "MP"]]], {"fields": ["id","name"], "limit": 1})
     if diarios:
         return diarios[0]["id"]
     return odoo_call(s, "account.journal", "create", [{
-        "name": "Mercado Pago",
-        "type": "bank",
-        "code": "MP",
+        "name": "Mercado Pago", "type": "bank", "code": "MP",
     }])
 
-def registrar_pago_odoo(pago_mp):
+# ============================================================
+# CLASIFICADOR DE MOVIMIENTOS MP
+# ============================================================
+def clasificar_mp(row):
+    """
+    Clasifica una fila del settlement report en una categoria.
+    Devuelve dict con: categoria, lineas (lista de dicts con date/payment_ref/label/amount/accion_manual)
+    """
+    t = row.get('TRANSACTION_TYPE', '')
+    pm_type = row.get('PAYMENT_METHOD_TYPE', '')
+    amount = float(row.get('TRANSACTION_AMOUNT', '0') or 0)
+    fee = float(row.get('FEE_AMOUNT', '0') or 0)
+    mp_id = row.get('SOURCE_ID', '')
+    fecha_raw = row.get('TRANSACTION_DATE', '')
+    fecha = fecha_raw[:10] if fecha_raw else date.today().isoformat()
+    pm = row.get('PAYMENT_METHOD', '')
+    last4 = row.get('LAST_FOUR_DIGITS', '')
+    issuer = row.get('ISSUER_NAME', '')
+    sale_detail = row.get('SALE_DETAIL', '').replace('"', '')
+    pay_transfer_id = row.get('PAY_BANK_TRANSFER_ID', '')
+
+    lineas = []
+
+    if t == 'SETTLEMENT':
+        if pm_type in ('credit_card', 'debit_card') and amount > 0:
+            # Venta Point: 2 lineas (bruto + comision)
+            lineas.append({
+                'date': fecha, 'payment_ref': f'MP-{mp_id}',
+                'label': f'Venta Point {pm} ***{last4} ({issuer})'.strip(),
+                'amount': round(amount, 2),
+                'accion_manual': False,
+            })
+            if abs(fee) > 0:
+                lineas.append({
+                    'date': fecha, 'payment_ref': f'MP-{mp_id}-FEE',
+                    'label': f'Comision MP venta {mp_id}',
+                    'amount': round(fee, 2),
+                    'accion_manual': False,
+                })
+            return 'venta_point', lineas
+
+        elif pm_type == 'bank_transfer' and amount > 0:
+            lineas.append({
+                'date': fecha, 'payment_ref': f'MP-{mp_id}',
+                'label': f'Money in - {sale_detail} (transfer_id: {pay_transfer_id})',
+                'amount': round(amount, 2),
+                'accion_manual': True,
+            })
+            return 'money_in', lineas
+
+        elif pm_type == 'available_money' and amount < 0:
+            lineas.append({
+                'date': fecha, 'payment_ref': f'MP-{mp_id}',
+                'label': 'Pago con saldo MP (available_money)',
+                'amount': round(amount, 2),
+                'accion_manual': True,
+            })
+            return 'gasto_saldo_mp', lineas
+
+    elif t == 'PAYOUTS':
+        lineas.append({
+            'date': fecha, 'payment_ref': f'MP-{mp_id}',
+            'label': f'Pago a proveedor (transfer_id: {pay_transfer_id})',
+            'amount': round(amount, 2),
+            'accion_manual': True,
+        })
+        return 'pago_proveedor', lineas
+
+    elif t == 'REFUND':
+        lineas.append({
+            'date': fecha, 'payment_ref': f'MP-{mp_id}-REFUND',
+            'label': f'Devolucion de venta MP-{mp_id}',
+            'amount': round(amount, 2),
+            'accion_manual': False,
+        })
+        if abs(fee) > 0:
+            lineas.append({
+                'date': fecha, 'payment_ref': f'MP-{mp_id}-REFUND-FEE',
+                'label': f'Reverso comision MP devolucion {mp_id}',
+                'amount': round(fee, 2),
+                'accion_manual': False,
+            })
+        return 'reverso_venta', lineas
+
+    # Desconocido: lo guardamos pero marcamos para revision
+    lineas.append({
+        'date': fecha, 'payment_ref': f'MP-{mp_id}',
+        'label': f'DESCONOCIDO type={t} pm_type={pm_type} amount={amount}',
+        'amount': round(amount, 2),
+        'accion_manual': True,
+    })
+    return 'desconocido', lineas
+
+def procesar_csv_settlement(csv_content, dry_run=False):
+    """Procesa un CSV de settlement report y escribe las lineas a Odoo.
+    Devuelve resumen con totales por categoria."""
+    reader = csv.DictReader(io.StringIO(csv_content), delimiter=';')
+    rows = list(reader)
+
+    todas_lineas = []
+    por_categoria = {}
+    for r in rows:
+        # Limpiar BOM y espacios en claves
+        r_clean = {k.strip().replace('\ufeff', ''): (v.strip() if v else '') for k, v in r.items()}
+        categoria, lineas = clasificar_mp(r_clean)
+        por_categoria.setdefault(categoria, {'count': 0, 'sum': 0.0, 'filas_csv': 0})
+        por_categoria[categoria]['filas_csv'] += 1
+        for l in lineas:
+            por_categoria[categoria]['count'] += 1
+            por_categoria[categoria]['sum'] += l['amount']
+            todas_lineas.append(l)
+
+    if dry_run:
+        return {
+            "dry_run": True,
+            "filas_csv": len(rows),
+            "lineas_odoo_a_crear": len(todas_lineas),
+            "por_categoria": por_categoria,
+            "total_neto": round(sum(l['amount'] for l in todas_lineas), 2),
+        }
+
+    # Escribir a Odoo
+    s, uid = odoo_session()
+    if not s:
+        return {"error": "Sin conexion Odoo"}
+
+    journal_id = get_or_create_mp_journal(s)
+
+    # Verificar duplicados existentes (por payment_ref)
+    creados = 0
+    ya_existian = 0
+    errores = []
+
+    for l in todas_lineas:
+        try:
+            existentes = odoo_call(s, "account.bank.statement.line", "search",
+                                  [[["payment_ref", "=", l['payment_ref']]]], {"limit": 1})
+            if existentes:
+                ya_existian += 1
+                continue
+            vals = {
+                "journal_id": journal_id,
+                "date": l['date'],
+                "payment_ref": l['payment_ref'],
+                "amount": l['amount'],
+                "narration": l['label'],
+            }
+            odoo_call(s, "account.bank.statement.line", "create", [vals])
+            creados += 1
+        except Exception as e:
+            errores.append({"payment_ref": l['payment_ref'], "error": str(e)})
+
+    return {
+        "filas_csv": len(rows),
+        "lineas_generadas": len(todas_lineas),
+        "creados": creados,
+        "ya_existian": ya_existian,
+        "errores": len(errores),
+        "detalle_errores": errores[:5],
+        "por_categoria": por_categoria,
+        "total_neto": round(sum(l['amount'] for l in todas_lineas), 2),
+    }
+
+# ============================================================
+# WEBHOOK MP
+# ============================================================
+def registrar_pago_webhook(pago_mp):
+    """Registra un pago recibido por webhook (solo el bruto, sin comision).
+    El settlement sync posterior ya lo detectara por payment_ref y agregara la comision."""
     s, uid = odoo_session()
     if not s:
         return False, "Sin conexion a Odoo"
@@ -124,13 +284,13 @@ def registrar_pago_odoo(pago_mp):
         if status != "approved":
             return True, f"Pago {mp_id} ignorado (status: {status})"
 
-        existentes = odoo_call(s, "account.bank.statement.line", "search_read",
-                              [[["payment_ref", "ilike", f"MP-{mp_id}"]]], {"fields": ["id"], "limit": 1})
+        payment_ref = f"MP-{mp_id}"
+        existentes = odoo_call(s, "account.bank.statement.line", "search",
+                              [[["payment_ref", "=", payment_ref]]], {"limit": 1})
         if existentes:
             return True, f"Pago MP #{mp_id} ya registrado"
 
         journal_id = get_or_create_mp_journal(s)
-
         partner_id = None
         if email:
             partners = odoo_call(s, "res.partner", "search_read",
@@ -141,8 +301,9 @@ def registrar_pago_odoo(pago_mp):
         vals = {
             "journal_id": journal_id,
             "date": fecha,
-            "payment_ref": f"MP-{mp_id} | {descripcion}",
+            "payment_ref": payment_ref,
             "amount": monto,
+            "narration": f"[webhook pendiente comision] {descripcion}",
         }
         if partner_id:
             vals["partner_id"] = partner_id
@@ -163,16 +324,15 @@ MODELOS ODOO:
 - purchase.order: OC (fields: name, partner_id, amount_total, state, date_order)
 - res.partner: clientes/proveedores (customer_rank>0 = cliente, supplier_rank>0 = proveedor)
 - account.move: facturas (move_type: out_invoice=venta, in_invoice=compra proveedor)
-- account.bank.statement.line: movimientos bancarios MP (fields: payment_ref, amount, date, journal_id)
+- account.bank.statement.line: movimientos bancarios MP
 - product.template: productos
-- stock.quant: inventario (fields: product_id, quantity, location_id)
+- stock.quant: inventario
+
+REGLA CRITICA: Para CUALQUIER consulta, usa SIEMPRE search_read o search_count. NUNCA uses 'create' para una consulta. 'create' solo se usa cuando el usuario pide explicitamente crear algo nuevo.
 
 EJEMPLOS:
-Ventas POS: ODOO_ACTION:{{"model":"pos.order","method":"search_read","args":[[["state","in",["done","paid","invoiced"]]]],"kwargs":{{"fields":["name","amount_total","date_order","partner_id"],"limit":10,"order":"date_order desc"}}}}
-OC pendientes: ODOO_ACTION:{{"model":"purchase.order","method":"search_read","args":[[["state","in",["draft","sent","purchase"]]]],"kwargs":{{"fields":["name","partner_id","amount_total","date_order","state"],"limit":20}}}}
-Cuentas por pagar: ODOO_ACTION:{{"model":"account.move","method":"search_read","args":[[["move_type","=","in_invoice"],["payment_state","!=","paid"]]],"kwargs":{{"fields":["name","partner_id","amount_total","invoice_date_due"],"limit":20,"order":"invoice_date_due asc"}}}}
-Movimientos MP: ODOO_ACTION:{{"model":"account.bank.statement.line","method":"search_read","args":[[["journal_id.code","=","MP"]]],"kwargs":{{"fields":["payment_ref","amount","date","partner_id"],"limit":20,"order":"date desc"}}}}
-Stock bajo: ODOO_ACTION:{{"model":"stock.quant","method":"search_read","args":[[["quantity","<",5],["location_id.usage","=","internal"]]],"kwargs":{{"fields":["product_id","quantity"],"limit":30}}}}
+Contar movimientos MP: ODOO_ACTION:{{"model":"account.bank.statement.line","method":"search_count","args":[[["journal_id.code","=","MP"]]]}}
+Listar ventas POS: ODOO_ACTION:{{"model":"pos.order","method":"search_read","args":[[["state","in",["done","paid","invoiced"]]]],"kwargs":{{"fields":["name","amount_total","date_order"],"limit":10}}}}
 
 REGLAS: Responde en espanol. SIEMPRE incluye ODOO_ACTION para consultas o acciones."""
 
@@ -208,7 +368,7 @@ def api_estado():
         return jsonify({"ok": False, "error": str(e)})
 
 # ============================================================
-# MERCADO PAGO ENDPOINTS
+# MP WEBHOOK
 # ============================================================
 @app.route("/mp/webhook", methods=["GET", "POST"])
 def mp_webhook():
@@ -235,88 +395,180 @@ def mp_webhook():
                         headers={"Authorization": f"Bearer {MP_ACCESS_TOKEN}"}, timeout=10)
         pago_mp = r.json()
 
-        success, mensaje = registrar_pago_odoo(pago_mp)
+        success, mensaje = registrar_pago_webhook(pago_mp)
         log.info(f"[MP WEBHOOK] {mensaje}")
         return jsonify({"status": "ok", "mensaje": mensaje}), 200
     except Exception as e:
         log.error(f"[MP WEBHOOK] Error: {str(e)}")
         return jsonify({"status": "error", "error": str(e)}), 500
 
-def sincronizar_movimientos_mp(dias=2):
-    """Cron de respaldo: captura pagos que el webhook pudo haber perdido."""
-    if not MP_ACCESS_TOKEN:
-        return {"error": "MP_ACCESS_TOKEN no configurado", "total": 0}
-
+# ============================================================
+# MP ADMIN - BORRADO Y CARGA MANUAL DE CSV
+# Endpoints TEMPORALES para setup inicial y debugging.
+# Se pueden quitar despues de estabilizar el flujo.
+# ============================================================
+@app.route("/mp/admin/list", methods=["GET"])
+def mp_admin_list():
+    """Lista TODOS los registros del journal MP. Solo lectura."""
     s, uid = odoo_session()
     if not s:
-        return {"error": "Sin conexion a Odoo", "total": 0}
-
-    fecha_desde = (datetime.now() - timedelta(days=dias)).strftime("%Y-%m-%dT00:00:00.000-06:00")
-
+        return jsonify({"error": "Sin conexion Odoo"}), 500
     try:
-        r = requests.get("https://api.mercadopago.com/v1/payments/search",
-                        headers={"Authorization": f"Bearer {MP_ACCESS_TOKEN}"},
-                        params={"sort": "date_created", "criteria": "desc", "begin_date": fecha_desde, "limit": 100, "offset": 0},
-                        timeout=15)
-        data = r.json()
-        movimientos = data.get("results", [])
-
-        if not movimientos:
-            return {"mensaje": "Sin movimientos nuevos", "total": 0}
-
         journal_id = get_or_create_mp_journal(s)
-        ok = 0
-        skip = 0
-
-        for mov in movimientos:
-            mp_id = str(mov.get("id", ""))
-            monto = float(mov.get("transaction_amount", 0))
-            status = mov.get("status", "")
-            desc = mov.get("description", f"Pago MP #{mp_id}")
-            fecha_raw = mov.get("date_approved", "")
-            fecha = fecha_raw[:10] if fecha_raw else date.today().isoformat()
-
-            if monto == 0 or status != "approved":
-                continue
-
-            existentes = odoo_call(s, "account.bank.statement.line", "search_read",
-                                  [[["payment_ref", "ilike", f"MP-{mp_id}"]]], {"fields": ["id"], "limit": 1})
-            if existentes:
-                skip += 1
-                continue
-
-            vals = {"journal_id": journal_id, "date": fecha,
-                   "payment_ref": f"MP-{mp_id} | {desc}", "amount": monto}
-
-            email = mov.get("payer", {}).get("email", "")
-            if email:
-                partners = odoo_call(s, "res.partner", "search_read",
-                                    [[["email", "=", email]]], {"fields": ["id"], "limit": 1})
-                if partners:
-                    vals["partner_id"] = partners[0]["id"]
-
-            odoo_call(s, "account.bank.statement.line", "create", [vals])
-            ok += 1
-
-        return {"mensaje": "Sincronizacion completa", "registrados": ok, "ya_existian": skip, "total_mp": len(movimientos)}
-    except Exception as e:
-        return {"error": str(e), "total": 0}
-
-@app.route("/mp/sincronizar", methods=["GET", "POST"])
-def mp_sincronizar():
-    try:
-        dias = 2
-        if request.method == "POST" and request.json:
-            dias = int(request.json.get("dias", 2))
-            dias = min(dias, 30)
-        resultado = sincronizar_movimientos_mp(dias)
-        log.info(f"[MP SYNC] {resultado}")
-        return jsonify(resultado), 200
+        lineas = odoo_call(s, "account.bank.statement.line", "search_read",
+            [[["journal_id", "=", journal_id]]],
+            {"fields": ["id", "date", "payment_ref", "amount", "narration"],
+             "order": "date desc, id desc", "limit": 500})
+        total = sum(float(l.get("amount", 0)) for l in lineas)
+        return jsonify({
+            "count": len(lineas),
+            "total_neto": round(total, 2),
+            "lineas": lineas,
+        })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route("/mp/admin/purge", methods=["POST"])
+def mp_admin_purge():
+    """Borra TODOS los registros del journal MP. Requiere confirmacion en body."""
+    data = request.get_json(silent=True) or {}
+    if data.get("confirmacion") != "BORRAR-TODO-JOURNAL-MP":
+        return jsonify({
+            "error": "Falta confirmacion",
+            "instruccion": "Envia body con confirmacion='BORRAR-TODO-JOURNAL-MP'"
+        }), 400
+
+    s, uid = odoo_session()
+    if not s:
+        return jsonify({"error": "Sin conexion Odoo"}), 500
+
+    try:
+        journal_id = get_or_create_mp_journal(s)
+        ids = odoo_call(s, "account.bank.statement.line", "search",
+            [[["journal_id", "=", journal_id]]], {"limit": 10000})
+
+        if not ids:
+            return jsonify({"borrados": 0, "mensaje": "No habia registros"})
+
+        odoo_call(s, "account.bank.statement.line", "unlink", [ids])
+        log.warning(f"[MP PURGE] Borrados {len(ids)} registros del journal MP")
+        return jsonify({"borrados": len(ids)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/mp/admin/load-csv", methods=["POST"])
+def mp_admin_load_csv():
+    """Carga un CSV de settlement report y crea las lineas en Odoo.
+    Query param dry_run=1 para solo simular."""
+    dry_run = request.args.get("dry_run", "0") == "1"
+
+    csv_file = request.files.get("file")
+    if not csv_file:
+        return jsonify({"error": "No se recibio archivo (campo 'file')"}), 400
+
+    try:
+        content = csv_file.read().decode("utf-8-sig", errors="replace")
+        resultado = procesar_csv_settlement(content, dry_run=dry_run)
+        log.info(f"[MP LOAD-CSV] dry_run={dry_run} result={resultado}")
+        return jsonify(resultado)
+    except Exception as e:
+        log.error(f"[MP LOAD-CSV] Error: {e}")
+        return jsonify({"error": str(e)}), 500
+
 # ============================================================
-# FACTURAS CFDI -> ODOO
+# MP SETTLEMENT SYNC (para cron diario)
+# Pide el reporte a MP, espera a que este listo, lo descarga y procesa.
+# ============================================================
+@app.route("/mp/settlement-sync", methods=["GET", "POST"])
+def mp_settlement_sync():
+    """Solicita settlement report de MP, espera, descarga y procesa."""
+    if not MP_ACCESS_TOKEN:
+        return jsonify({"error": "MP_ACCESS_TOKEN no configurado"}), 500
+
+    dias = 2
+    if request.method == "POST" and request.json:
+        dias = int(request.json.get("dias", 2))
+    dias = min(dias, 30)
+
+    end = datetime.utcnow()
+    begin = end - timedelta(days=dias)
+    begin_str = begin.strftime("%Y-%m-%dT00:00:00.000Z")
+    end_str = end.strftime("%Y-%m-%dT23:59:59.000Z")
+
+    headers_mp = {
+        "Authorization": f"Bearer {MP_ACCESS_TOKEN}",
+        "Content-Type": "application/json",
+    }
+
+    # Paso 1: listar reportes ya generados
+    try:
+        r_list = requests.get(
+            "https://api.mercadopago.com/v1/account/settlement_report/list",
+            headers=headers_mp, timeout=15)
+        reportes = r_list.json() if r_list.status_code == 200 else []
+    except Exception as e:
+        return jsonify({"error": f"Error listando reportes: {e}"}), 500
+
+    # Buscar un reporte reciente que cubra nuestro rango
+    ahora = datetime.utcnow()
+    reporte_usable = None
+    if isinstance(reportes, list):
+        for rep in reportes:
+            try:
+                file_name = rep.get("file_name", "")
+                created = rep.get("date_created", "")
+                # Buscar reporte creado en ultimas 4 horas
+                if "-" in created:
+                    created_dt = datetime.fromisoformat(created.replace("Z", "+00:00").replace(".000", ""))
+                    if (ahora - created_dt.replace(tzinfo=None)).total_seconds() < 4 * 3600:
+                        reporte_usable = file_name
+                        break
+            except:
+                continue
+
+    if not reporte_usable:
+        # Solicitar un nuevo reporte
+        try:
+            r_gen = requests.post(
+                "https://api.mercadopago.com/v1/account/settlement_report",
+                headers=headers_mp,
+                json={"begin_date": begin_str, "end_date": end_str},
+                timeout=30)
+            if r_gen.status_code not in (200, 201):
+                return jsonify({
+                    "error": f"No se pudo solicitar reporte (HTTP {r_gen.status_code})",
+                    "respuesta": r_gen.text[:500],
+                }), 500
+            return jsonify({
+                "mensaje": "Reporte solicitado. MP tarda algunos minutos en generarlo.",
+                "siguiente_paso": "Volver a llamar este endpoint en 5-10 min",
+            })
+        except Exception as e:
+            return jsonify({"error": f"Error solicitando reporte: {e}"}), 500
+
+    # Paso 2: descargar el reporte
+    try:
+        r_down = requests.get(
+            f"https://api.mercadopago.com/v1/account/settlement_report/{reporte_usable}",
+            headers={"Authorization": f"Bearer {MP_ACCESS_TOKEN}"},
+            timeout=60)
+        if r_down.status_code != 200:
+            return jsonify({
+                "error": f"No se pudo descargar reporte (HTTP {r_down.status_code})",
+                "file_name": reporte_usable,
+            }), 500
+        csv_content = r_down.text
+    except Exception as e:
+        return jsonify({"error": f"Error descargando: {e}"}), 500
+
+    # Paso 3: procesar y guardar
+    resultado = procesar_csv_settlement(csv_content, dry_run=False)
+    resultado["fuente"] = reporte_usable
+    log.info(f"[MP SETTLEMENT SYNC] {resultado}")
+    return jsonify(resultado)
+
+# ============================================================
+# FACTURAS CFDI
 # ============================================================
 @app.route('/facturas/analizar-xml', methods=['POST'])
 def facturas_analizar_xml():
@@ -417,7 +669,6 @@ def facturas_confirmar():
             return jsonify({'error': 'No se pudo conectar a Odoo'}), 500
 
         proveedor_id = data.get('proveedor_id')
-        log.info(f'confirmar - proveedor_id={proveedor_id} keys={list(data.keys())}')
         if not proveedor_id:
             return jsonify({'error': 'Proveedor no identificado'}), 400
 
@@ -457,7 +708,7 @@ def facturas_confirmar():
             lineas.append([0, 0, line])
 
         if not lineas:
-            return jsonify({'error': 'No hay productos vinculados a Odoo. Verifica los candidatos.'}), 400
+            return jsonify({'error': 'No hay productos vinculados a Odoo'}), 400
 
         move_vals = {
             'move_type': 'in_invoice',
@@ -513,7 +764,7 @@ def api_ocr_oc():
     return jsonify(resultado)
 
 # ============================================================
-# CHAT
+# CHAT (lo dejamos pero con prompt mejorado)
 # ============================================================
 @app.route("/api/chat", methods=["POST"])
 def api_chat():
@@ -557,7 +808,11 @@ def api_chat():
                 if "```" in accion_str:
                     accion_str = accion_str.split("```")[0].strip()
                 accion = json.loads(accion_str)
-                accion_resultado = ejecutar_accion_odoo(accion)
+                # SAFETY: bloquear creates/writes/unlinks en el chat
+                if accion.get("method") in ("create", "write", "unlink"):
+                    accion_resultado = f"BLOQUEADO: metodo '{accion.get('method')}' no permitido via chat. Usa endpoint admin."
+                else:
+                    accion_resultado = ejecutar_accion_odoo(accion)
             except Exception as e:
                 accion_resultado = f"Error: {str(e)}"
         else:
