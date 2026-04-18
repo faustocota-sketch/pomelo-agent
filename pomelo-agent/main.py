@@ -593,14 +593,22 @@ def mp_settlement_sync():
                 headers=headers_mp,
                 json={"begin_date": begin_str, "end_date": end_str},
                 timeout=30)
-            if r_gen.status_code not in (200, 201):
+            if r_gen.status_code not in (200, 201, 202):
                 return jsonify({
                     "error": f"No se pudo solicitar reporte (HTTP {r_gen.status_code})",
                     "respuesta": r_gen.text[:500],
                 }), 500
+            # Extraer el id del reporte solicitado (si MP lo devuelve en JSON)
+            try:
+                gen_data = r_gen.json()
+                report_id = gen_data.get("id")
+            except:
+                report_id = None
             return jsonify({
                 "mensaje": "Reporte solicitado. MP tarda algunos minutos en generarlo.",
                 "siguiente_paso": "Volver a llamar este endpoint en 5-10 min",
+                "report_id": report_id,
+                "http_status": r_gen.status_code,
             })
         except Exception as e:
             return jsonify({"error": f"Error solicitando reporte: {e}"}), 500
