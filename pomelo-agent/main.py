@@ -125,9 +125,17 @@ def clasificar_mp(row):
 
     if t == 'SETTLEMENT':
         if pm_type in ('credit_card', 'debit_card') and amount > 0:
-            # Venta Point: la venta bruta YA viene del POS (journal MP directo via MP_Halus).
-            # Aqui solo registramos la comision MP como gasto para que el journal MP
-            # refleje correctamente el neto que llega a MP.
+            # Venta Point: bajo la arquitectura MP=verdad, registramos AMBAS:
+            # 1) Venta bruta (monto total): entra a 102.01.07 (plata que llego a MP)
+            # 2) Comision MP (negativa): sale de 102.01.07 (gasto MP)
+            # El resultado neto en 102.01.07 = amount + fee (fee viene negativo)
+            # = SETTLEMENT_NET_AMOUNT (lo que MP realmente acredita).
+            lineas.append({
+                'date': fecha, 'payment_ref': f'MP-{mp_id}',
+                'label': f'Venta Point MP-{mp_id} {pm} ****{last4}',
+                'amount': round(amount, 2),
+                'accion_manual': False,
+            })
             if abs(fee) > 0:
                 lineas.append({
                     'date': fecha, 'payment_ref': f'MP-{mp_id}-FEE',
@@ -135,7 +143,7 @@ def clasificar_mp(row):
                     'amount': round(fee, 2),
                     'accion_manual': False,
                 })
-            return 'comision_point', lineas
+            return 'venta_point', lineas
 
         elif pm_type == 'bank_transfer' and amount > 0:
             lineas.append({
