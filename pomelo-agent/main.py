@@ -125,13 +125,9 @@ def clasificar_mp(row):
 
     if t == 'SETTLEMENT':
         if pm_type in ('credit_card', 'debit_card') and amount > 0:
-            # Venta Point: 2 lineas (bruto + comision)
-            lineas.append({
-                'date': fecha, 'payment_ref': f'MP-{mp_id}',
-                'label': f'Venta Point {pm} ***{last4} ({issuer})'.strip(),
-                'amount': round(amount, 2),
-                'accion_manual': False,
-            })
+            # Venta Point: la venta bruta YA viene del POS (journal MP directo via MP_Halus).
+            # Aqui solo registramos la comision MP como gasto para que el journal MP
+            # refleje correctamente el neto que llega a MP.
             if abs(fee) > 0:
                 lineas.append({
                     'date': fecha, 'payment_ref': f'MP-{mp_id}-FEE',
@@ -139,7 +135,7 @@ def clasificar_mp(row):
                     'amount': round(fee, 2),
                     'accion_manual': False,
                 })
-            return 'venta_point', lineas
+            return 'comision_point', lineas
 
         elif pm_type == 'bank_transfer' and amount > 0:
             lineas.append({
@@ -450,58 +446,71 @@ def mp_admin_purge():
             [[["journal_id", "=", journal_id]]], {"limit": 10000})
 
         if not line_ids:
-            return jsonify({"borrados_lineas": 0, "borrados_statements": 0,
-                           "mensaje": "No habia registros"})
+            return jsonify({"borrados": 0, "mensaje": "No habia registros"})
 
-        # 2. Obtener los statement_ids padres (unicos) de esas lineas
+        total_originales = len(line_ids)
+
+        # 2. Leer los move_id de cada linea
         lineas_read = odoo_call(s, "account.bank.statement.line", "read",
-            [line_ids, ["statement_id"]])
-        statement_ids = set()
+            [line_ids, ["move_id", "statement_id"]])
+
+        move_ids = set()
         for l in lineas_read:
-            st = l.get("statement_id")
-            if st and isinstance(st, list) and len(st) > 0:
-                statement_ids.add(st[0])
-            elif isinstance(st, int):
-                statement_ids.add(st)
-        statement_ids = list(statement_ids)
+            mv = l.get("move_id")
+            if mv and isinstance(mv, list) and len(mv) > 0:
+                move_ids.add(mv[0])
+            elif isinstance(mv, int):
+                move_ids.add(mv)
+        move_ids = list(move_ids)
 
-        borrados_lineas = 0
-        borrados_statements = 0
+        log.warning(f"[MP PURGE] Encontradas {total_originales} lineas con {len(move_ids)} moves asociados")
 
-        # 3. Intentar borrar statements primero (cascada deberia borrar lineas)
-        if statement_ids:
-            # Primero poner statements en borrador por si estan confirmados
+        # 3. Pasar los moves a borrador (button_draft) para desposter
+        if move_ids:
             try:
-                odoo_call(s, "account.bank.statement", "button_reopen", [statement_ids])
+                odoo_call(s, "account.move", "button_draft", [move_ids])
+                log.info(f"[MP PURGE] {len(move_ids)} moves pasados a borrador")
             except Exception as e:
-                log.info(f"[MP PURGE] button_reopen fallo (puede ser ok): {e}")
-            # Intentar borrar
-            try:
-                odoo_call(s, "account.bank.statement", "unlink", [statement_ids])
-                borrados_statements = len(statement_ids)
-                log.warning(f"[MP PURGE] Borrados {borrados_statements} statements (cascada)")
-            except Exception as e:
-                log.error(f"[MP PURGE] Error borrando statements: {e}")
+                log.error(f"[MP PURGE] button_draft fallo: {e}")
+                # Intentar unlink directo sobre los moves (borra tambien las lines en cascada)
+                pass
 
-        # 4. Buscar lineas residuales (por si el cascade no fue completo)
-        residual_ids = odoo_call(s, "account.bank.statement.line", "search",
-            [[["journal_id", "=", journal_id]]], {"limit": 10000})
-
-        if residual_ids:
+        # 4. Borrar los moves (esto desencadena el borrado de las lines via cascada)
+        moves_borrados = 0
+        if move_ids:
             try:
-                odoo_call(s, "account.bank.statement.line", "unlink", [residual_ids])
-                borrados_lineas = len(residual_ids)
+                odoo_call(s, "account.move", "unlink", [move_ids])
+                moves_borrados = len(move_ids)
+                log.warning(f"[MP PURGE] {moves_borrados} moves borrados")
             except Exception as e:
+                log.error(f"[MP PURGE] Error borrando moves: {e}")
                 return jsonify({
-                    "error": f"Statements borrados={borrados_statements}, pero quedan {len(residual_ids)} lineas residuales: {str(e)}"
+                    "error": f"No se pudieron borrar los moves: {str(e)}",
+                    "lineas_originales": total_originales,
+                    "moves_identificados": len(move_ids),
                 }), 500
 
-        total_lineas_originales = len(line_ids)
-        log.warning(f"[MP PURGE] Total lineas originales: {total_lineas_originales}, statements borrados: {borrados_statements}, lineas residuales borradas: {borrados_lineas}")
+        # 5. Verificar que ya no quedan lineas
+        residuales = odoo_call(s, "account.bank.statement.line", "search",
+            [[["journal_id", "=", journal_id]]], {"limit": 10000})
+
+        lineas_residuales_borradas = 0
+        if residuales:
+            log.warning(f"[MP PURGE] Quedan {len(residuales)} lineas residuales tras borrar moves")
+            try:
+                odoo_call(s, "account.bank.statement.line", "unlink", [residuales])
+                lineas_residuales_borradas = len(residuales)
+            except Exception as e:
+                return jsonify({
+                    "error": f"Quedaron {len(residuales)} lineas residuales sin borrar: {str(e)}",
+                    "lineas_originales": total_originales,
+                    "moves_borrados": moves_borrados,
+                }), 500
+
         return jsonify({
-            "lineas_originales": total_lineas_originales,
-            "statements_borrados": borrados_statements,
-            "lineas_residuales_borradas": borrados_lineas,
+            "lineas_originales": total_originales,
+            "moves_borrados": moves_borrados,
+            "lineas_residuales_borradas": lineas_residuales_borradas,
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
