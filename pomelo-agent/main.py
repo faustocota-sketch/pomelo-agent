@@ -310,6 +310,57 @@ def registrar_pago_webhook(pago_mp):
         return False, str(e)
 
 # ============================================================
+# ADMIN EXEC - Endpoint temporal para operaciones controladas
+# QUITAR despues de completar migracion journal MP (abril 2026)
+# ============================================================
+ADMIN_EXEC_TOKEN = os.environ.get("ADMIN_EXEC_TOKEN", "")
+ADMIN_EXEC_ENABLED = os.environ.get("ADMIN_EXEC_ENABLED", "false").lower() == "true"
+
+ADMIN_EXEC_BLOCKED_MODELS = {
+    "ir.config_parameter", "ir.mail_server",
+    "res.users", "res.groups", "ir.model.access",
+    "ir.rule", "res.company",
+}
+ADMIN_EXEC_READONLY_METHODS = {"search", "search_read", "search_count", "read", "fields_get", "name_search"}
+
+@app.route("/admin/odoo-exec", methods=["POST"])
+def admin_odoo_exec():
+    if not ADMIN_EXEC_ENABLED:
+        return jsonify({"error": "not found"}), 404
+
+    token = request.headers.get("X-Admin-Token", "")
+    if not token or not ADMIN_EXEC_TOKEN or token != ADMIN_EXEC_TOKEN:
+        log.warning(f"[ADMIN EXEC] Auth failed from {request.remote_addr}")
+        return jsonify({"error": "unauthorized"}), 401
+
+    data = request.get_json(silent=True) or {}
+    model = data.get("model")
+    method = data.get("method")
+    args = data.get("args", [])
+    kwargs = data.get("kwargs", {})
+
+    if not model or not method:
+        return jsonify({"error": "model y method requeridos"}), 400
+
+    if model in ADMIN_EXEC_BLOCKED_MODELS and method not in ADMIN_EXEC_READONLY_METHODS:
+        log.warning(f"[ADMIN EXEC] Bloqueado: {model}.{method}")
+        return jsonify({"error": f"model {model} solo permite lectura"}), 403
+
+    args_preview = json.dumps(args)[:200] if args else "[]"
+    log.warning(f"[ADMIN EXEC] {model}.{method} args={args_preview}")
+
+    s, uid = odoo_session()
+    if not s:
+        return jsonify({"error": "Sin conexion Odoo"}), 500
+
+    try:
+        resultado = odoo_call(s, model, method, args, kwargs)
+        return jsonify({"ok": True, "result": resultado})
+    except Exception as e:
+        log.error(f"[ADMIN EXEC] Error: {str(e)}")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+# ============================================================
 # SYSTEM PROMPT
 # ============================================================
 SYSTEM_PROMPT = """Eres Claudio, agente IA de Pomelo Derma, farmacia dermatologica premium en Mexico.
