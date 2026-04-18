@@ -262,9 +262,28 @@ def procesar_csv_settlement(csv_content, dry_run=False):
 # ============================================================
 # WEBHOOK MP
 # ============================================================
+# IDs de cuentas clave para la arquitectura MP (abril 2026)
+# 102.01.07 Mercado Pago (journal 14 default) = plata confirmada por webhook
+# 102.01.09 MP Halus pendiente conciliar = puente POS ↔ MP (outstanding de MP_Halus)
+MP_CUENTA_REAL_ID = 97      # 102.01.07
+MP_CUENTA_PUENTE_ID = 100   # 102.01.09
+
 def registrar_pago_webhook(pago_mp):
-    """Registra un pago recibido por webhook (solo el bruto, sin comision).
-    El settlement sync posterior ya lo detectara por payment_ref y agregara la comision."""
+    """Registra un pago MP recibido por webhook y lo concilia contra venta POS
+    pendiente en 102.01.09 si hay match exacto (monto + fecha ±24h).
+
+    Flujo:
+    1. Crea bank.statement.line en journal 14 (auto-genera asiento:
+       DEBE 102.01.07 / HABER 102.01.02 suspense)
+    2. Edita el move generado: reemplaza la linea del suspense (90)
+       por 102.01.09 (100), asi el asiento queda:
+       DEBE 102.01.07 / HABER 102.01.09
+    3. Busca en 102.01.09 una linea POS sin conciliar con monto exacto
+       en ventana fecha ±24h.
+    4. Si hay EXACTAMENTE 1 candidato, reconcilia las dos lineas de 102.01.09
+       (HABER del webhook + DEBE del POS) - quedan con same full_reconcile_id.
+    5. Si hay 0 o 2+ candidatos, registra sin conciliar (revision manual).
+    """
     s, uid = odoo_session()
     if not s:
         return False, "Sin conexion a Odoo"
@@ -294,6 +313,7 @@ def registrar_pago_webhook(pago_mp):
             if partners:
                 partner_id = partners[0]["id"]
 
+        # --- PASO 1: crear statement.line ---
         vals = {
             "journal_id": journal_id,
             "date": fecha,
@@ -304,9 +324,87 @@ def registrar_pago_webhook(pago_mp):
         if partner_id:
             vals["partner_id"] = partner_id
 
-        odoo_call(s, "account.bank.statement.line", "create", [vals])
-        return True, f"Pago MP #{mp_id} registrado: ${monto:,.2f} MXN"
+        new_line_id = odoo_call(s, "account.bank.statement.line", "create", [vals])
+
+        # --- PASO 2: reemplazar suspense (102.01.02) por puente (102.01.09) ---
+        # Leer el move asociado al statement.line
+        line_data = odoo_call(s, "account.bank.statement.line", "read",
+                              [[new_line_id], ["move_id"]])
+        if not line_data or not line_data[0].get("move_id"):
+            log.error(f"[WEBHOOK] statement.line {new_line_id} sin move asociado")
+            return True, f"Pago MP #{mp_id} registrado pero sin move: ${monto:,.2f}"
+        move_id = line_data[0]["move_id"][0]
+
+        # Buscar la linea del suspense en ese move y redirigirla a 102.01.09
+        suspense_lines = odoo_call(s, "account.move.line", "search",
+            [[["move_id", "=", move_id], ["account_id", "!=", MP_CUENTA_REAL_ID]]],
+            {"limit": 2})
+        if len(suspense_lines) == 1:
+            try:
+                # Pasar move a draft para poder editar
+                odoo_call(s, "account.move", "button_draft", [[move_id]])
+                odoo_call(s, "account.move.line", "write",
+                         [suspense_lines, {"account_id": MP_CUENTA_PUENTE_ID}])
+                odoo_call(s, "account.move", "action_post", [[move_id]])
+            except Exception as e:
+                log.error(f"[WEBHOOK] Error redirigiendo suspense->puente: {e}")
+                return True, f"Pago MP #{mp_id} registrado (suspense no redirigido): {str(e)}"
+        else:
+            log.warning(f"[WEBHOOK] move {move_id} tiene {len(suspense_lines)} lineas no-MP, esperaba 1")
+
+        # --- PASO 3: buscar match en 102.01.09 ---
+        # Venta POS quedara en 102.01.09 con DEBE = monto
+        # Webhook acaba de crear HABER = monto en 102.01.09
+        # Ventana: fecha ±24h
+        try:
+            fecha_dt = datetime.strptime(fecha, "%Y-%m-%d")
+        except:
+            fecha_dt = datetime.now()
+        fecha_ini = (fecha_dt - timedelta(days=1)).strftime("%Y-%m-%d")
+        fecha_fin = (fecha_dt + timedelta(days=1)).strftime("%Y-%m-%d")
+
+        # Candidatos: lineas en 102.01.09, DEBE=monto, no conciliadas,
+        # excluyendo la linea HABER que acabamos de crear
+        candidatos = odoo_call(s, "account.move.line", "search_read",
+            [[
+                ["account_id", "=", MP_CUENTA_PUENTE_ID],
+                ["debit", "=", monto],
+                ["credit", "=", 0],
+                ["reconciled", "=", False],
+                ["date", ">=", fecha_ini],
+                ["date", "<=", fecha_fin],
+                ["parent_state", "=", "posted"],
+            ]],
+            {"fields": ["id","move_id","date","debit","credit","ref"]})
+
+        if len(candidatos) == 1:
+            # Buscar la linea HABER del webhook (en 102.01.09 del move_id recien creado)
+            webhook_haber = odoo_call(s, "account.move.line", "search",
+                [[
+                    ["move_id", "=", move_id],
+                    ["account_id", "=", MP_CUENTA_PUENTE_ID],
+                    ["credit", "=", monto],
+                ]],
+                {"limit": 1})
+            if webhook_haber:
+                try:
+                    lineas_a_conciliar = [candidatos[0]["id"], webhook_haber[0]]
+                    odoo_call(s, "account.move.line", "reconcile", [lineas_a_conciliar])
+                    return True, f"Pago MP #{mp_id} registrado y conciliado: ${monto:,.2f} contra POS line {candidatos[0]['id']}"
+                except Exception as e:
+                    log.error(f"[WEBHOOK] Reconcile fallo: {e}")
+                    return True, f"Pago MP #{mp_id} registrado, reconcile fallo: {str(e)}"
+            else:
+                log.warning(f"[WEBHOOK] No se encontro linea HABER del webhook en move {move_id}")
+                return True, f"Pago MP #{mp_id} registrado (linea webhook no encontrada para conciliar)"
+        elif len(candidatos) == 0:
+            log.info(f"[WEBHOOK] Pago {mp_id} ${monto:,.2f} sin match POS, revisar manual")
+            return True, f"Pago MP #{mp_id} registrado SIN conciliar (no match POS): ${monto:,.2f}"
+        else:
+            log.warning(f"[WEBHOOK] Pago {mp_id} ${monto:,.2f} con {len(candidatos)} candidatos ambiguos, revisar manual")
+            return True, f"Pago MP #{mp_id} registrado SIN conciliar ({len(candidatos)} candidatos ambiguos): ${monto:,.2f}"
     except Exception as e:
+        log.error(f"[WEBHOOK] Error general: {e}")
         return False, str(e)
 
 # ============================================================
