@@ -444,15 +444,65 @@ def mp_admin_purge():
 
     try:
         journal_id = get_or_create_mp_journal(s)
-        ids = odoo_call(s, "account.bank.statement.line", "search",
+
+        # 1. Buscar lineas
+        line_ids = odoo_call(s, "account.bank.statement.line", "search",
             [[["journal_id", "=", journal_id]]], {"limit": 10000})
 
-        if not ids:
-            return jsonify({"borrados": 0, "mensaje": "No habia registros"})
+        if not line_ids:
+            return jsonify({"borrados_lineas": 0, "borrados_statements": 0,
+                           "mensaje": "No habia registros"})
 
-        odoo_call(s, "account.bank.statement.line", "unlink", [ids])
-        log.warning(f"[MP PURGE] Borrados {len(ids)} registros del journal MP")
-        return jsonify({"borrados": len(ids)})
+        # 2. Obtener los statement_ids padres (unicos) de esas lineas
+        lineas_read = odoo_call(s, "account.bank.statement.line", "read",
+            [line_ids, ["statement_id"]])
+        statement_ids = set()
+        for l in lineas_read:
+            st = l.get("statement_id")
+            if st and isinstance(st, list) and len(st) > 0:
+                statement_ids.add(st[0])
+            elif isinstance(st, int):
+                statement_ids.add(st)
+        statement_ids = list(statement_ids)
+
+        borrados_lineas = 0
+        borrados_statements = 0
+
+        # 3. Intentar borrar statements primero (cascada deberia borrar lineas)
+        if statement_ids:
+            # Primero poner statements en borrador por si estan confirmados
+            try:
+                odoo_call(s, "account.bank.statement", "button_reopen", [statement_ids])
+            except Exception as e:
+                log.info(f"[MP PURGE] button_reopen fallo (puede ser ok): {e}")
+            # Intentar borrar
+            try:
+                odoo_call(s, "account.bank.statement", "unlink", [statement_ids])
+                borrados_statements = len(statement_ids)
+                log.warning(f"[MP PURGE] Borrados {borrados_statements} statements (cascada)")
+            except Exception as e:
+                log.error(f"[MP PURGE] Error borrando statements: {e}")
+
+        # 4. Buscar lineas residuales (por si el cascade no fue completo)
+        residual_ids = odoo_call(s, "account.bank.statement.line", "search",
+            [[["journal_id", "=", journal_id]]], {"limit": 10000})
+
+        if residual_ids:
+            try:
+                odoo_call(s, "account.bank.statement.line", "unlink", [residual_ids])
+                borrados_lineas = len(residual_ids)
+            except Exception as e:
+                return jsonify({
+                    "error": f"Statements borrados={borrados_statements}, pero quedan {len(residual_ids)} lineas residuales: {str(e)}"
+                }), 500
+
+        total_lineas_originales = len(line_ids)
+        log.warning(f"[MP PURGE] Total lineas originales: {total_lineas_originales}, statements borrados: {borrados_statements}, lineas residuales borradas: {borrados_lineas}")
+        return jsonify({
+            "lineas_originales": total_lineas_originales,
+            "statements_borrados": borrados_statements,
+            "lineas_residuales_borradas": borrados_lineas,
+        })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
